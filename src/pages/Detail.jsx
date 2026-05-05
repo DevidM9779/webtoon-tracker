@@ -24,7 +24,49 @@ export default function Detail() {
   }, [id]);
 
   const handleUpdate = async (field, value) => {
+    // 1. Don't do anything if the value hasn't actually changed
+    if (webtoon[field] === value) return;
+
+    // 2. Update the main webtoon document
     await updateDoc(doc(db, "webtoons", id), { [field]: value });
+
+    // 3. Generate the social feed activity
+    let type = "";
+    let details = "";
+    let actorName = "";
+
+    if (field === 'myProgress') {
+      type = "PROGRESS";
+      details = `read up to episode ${value}`;
+      actorName = "Justin"; // The person doing the action
+    } else if (field === 'adriProgress') {
+      type = "PROGRESS";
+      details = `read up to episode ${value}`;
+      actorName = "Adri";
+    } else if (field === 'status' && value === 'Completed') {
+      type = "COMPLETE";
+      details = "marked the series as completed!";
+      actorName = "Justin"; // Defaulting to you for general actions until Auth is added
+    } else if (field === 'rating') {
+      type = "RATING";
+      details = `rated the series ${value} stars`;
+      actorName = "Justin";
+    }
+
+    // 4. Save to the activities collection
+    if (type) {
+      import("firebase/firestore").then(({ collection, addDoc }) => {
+        addDoc(collection(db, "activities"), {
+          userId: actorName.toLowerCase(),
+          userName: actorName,
+          type,
+          webtoonId: id,
+          webtoonTitle: webtoon.title,
+          details,
+          createdAt: new Date().toISOString()
+        });
+      });
+    }
   };
 
   const handleDelete = async () => {

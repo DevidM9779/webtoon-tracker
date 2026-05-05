@@ -1,5 +1,9 @@
 {
   "projects": {
-    "default": "demo-webtoon-app"
-  }
+    "default": "demo-webtoon-app",
+    "staging": "webtoon-tracker-demo",
+    "production": "webtoon-tracker-demo"
+  },
+  "targets": {},
+  "etags": {}
 }

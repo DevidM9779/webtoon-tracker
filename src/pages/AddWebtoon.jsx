@@ -59,13 +59,25 @@ export default function AddWebtoon() {
     e.preventDefault();
     if (!form.title.trim()) return;
 
-    await addDoc(collection(db, "webtoons"), {
+    // 1. Add the webtoon
+    const docRef = await addDoc(collection(db, "webtoons"), {
       ...form,
       totalEpisodes: parseInt(form.totalEpisodes, 10) || 0,
       myProgress: parseInt(form.myProgress, 10) || 0,
       adriProgress: parseInt(form.adriProgress, 10) || 0,
       rating: form.rating,
       createdAt: new Date().toISOString(),
+    });
+
+    // 2. Create the social feed post
+    await addDoc(collection(db, "activities"), {
+      userId: "justin", // Mock user ID
+      userName: "Justin", // Mock user name
+      type: "ADD",
+      webtoonId: docRef.id,
+      webtoonTitle: form.title,
+      details: "added a new Webtoon to the library.",
+      createdAt: new Date().toISOString()
     });
 
     navigate("/");
