@@ -4,6 +4,28 @@ import { collection, query, where, onSnapshot, orderBy, doc, updateDoc, deleteDo
 import { db } from "../firebase";
 import { Activity, Star, BookOpen, PlusCircle, CheckCircle, Users, UserPlus, Check, X, Loader2, User } from "lucide-react";
 
+// Helper function to sanitize objects before saving to Firestore
+const sanitizeObject = (obj) => {
+  const sanitized = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) {
+      // Provide fallbacks for common fields
+      if (key === 'coverImage' || key === 'imageUrl') {
+        sanitized[key] = '';
+      } else if (key === 'title' || key === 'name' || key === 'displayName' || key === 'userName') {
+        sanitized[key] = '';
+      } else if (key === 'genre') {
+        sanitized[key] = '';
+      } else {
+        sanitized[key] = null;
+      }
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+};
+
 export default function Feed({ user }) {
   const [activities, setActivities] = useState([]);
   const [followingIds, setFollowingIds] = useState([]);
@@ -77,18 +99,20 @@ export default function Feed({ user }) {
       });
 
       // Add to current user's friends collection (create new document)
-      await setDoc(doc(db, `users/${user.uid}/following`, request.requesterId), {
+      const friendship1 = sanitizeObject({
         userId: request.requesterId,
         displayName: request.requesterName,
         followedAt: new Date().toISOString()
       });
+      await setDoc(doc(db, `users/${user.uid}/following`, request.requesterId), friendship1);
 
       // Add reverse friendship (bidirectional)
-      await setDoc(doc(db, `users/${request.requesterId}/following`, user.uid), {
+      const friendship2 = sanitizeObject({
         userId: user.uid,
         displayName: user.displayName || "Anonymous",
         followedAt: new Date().toISOString()
       });
+      await setDoc(doc(db, `users/${request.requesterId}/following`, user.uid), friendship2);
     } catch (error) {
       console.error("Error accepting request:", error);
       alert("Failed to accept friend request");

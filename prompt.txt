@@ -1,6 +1,0 @@
-When I click accept follow request it currently is inverting it, and acting like if I was the one who requested the follow to the other person. Switch the concept of requesting to follow with requesting to be friends. Meaning, that once requested and accepted both users can see each others webtoons, profiles and activities.
-
-Also, fix the favorites section, currently it isn't letting me select which of my webtoons in my collection I want to add as my favorite.
-
-Also, when adding a new webtoon, in order to be able to reuse previously fetched webtoons, it will need to allow the possibility of looking into the GlobalWebtoons collection/library. So for that reason, I would like to change the UI of the add a webtoon panel. It should give first the option of searching it in the "Webtoon Tracker library" and if it can't be found then it will allow you to either enter it manually or fetch it from a URL.
-Also, for manually inputted webtoons, I need the app to allow editing it manually rather than having the possibility of refreshing / re-fetching the webtoon.

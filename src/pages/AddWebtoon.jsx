@@ -4,6 +4,28 @@ import { collection, addDoc, getDocs, query, where, getDoc, doc } from "firebase
 import { db } from "../firebase";
 import { Search, Loader2, Save, Globe, FileText, Plus } from "lucide-react";
 
+// Helper function to sanitize objects before saving to Firestore
+const sanitizeObject = (obj) => {
+  const sanitized = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) {
+      // Provide fallbacks for common fields
+      if (key === 'coverImage' || key === 'imageUrl') {
+        sanitized[key] = '';
+      } else if (key === 'title' || key === 'name' || key === 'displayName' || key === 'userName') {
+        sanitized[key] = '';
+      } else if (key === 'genre') {
+        sanitized[key] = '';
+      } else {
+        sanitized[key] = null;
+      }
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+};
+
 export default function AddWebtoon({ user }) {
   const navigate = useNavigate();
   
@@ -27,7 +49,6 @@ export default function AddWebtoon({ user }) {
     status: "Ongoing",
     rating: 0,
     myProgress: 0,
-    adriProgress: 0,
     webtoonId: "",
     sourceUrl: "",
     isManual: false, // Track if this is manually entered
@@ -159,10 +180,6 @@ export default function AddWebtoon({ user }) {
       alert("My progress cannot be negative");
       return;
     }
-    if (form.adriProgress && parseInt(form.adriProgress, 10) < 0) {
-      alert("Adri's progress cannot be negative");
-      return;
-    }
 
     // Check if webtoon already exists in user's library
     try {
@@ -185,17 +202,17 @@ export default function AddWebtoon({ user }) {
       }
 
       // Add the webtoon to user's library
-      const docRef = await addDoc(collection(db, `userLibraries/${user.uid}/webtoons`), {
+      const webtoonData = sanitizeObject({
         ...form,
         userId: user.uid,
         totalEpisodes: parseInt(form.totalEpisodes, 10) || 0,
         myProgress: parseInt(form.myProgress, 10) || 0,
-        adriProgress: parseInt(form.adriProgress, 10) || 0,
         rating: form.rating,
         createdAt: new Date().toISOString(),
       });
+      const docRef = await addDoc(collection(db, `userLibraries/${user.uid}/webtoons`), webtoonData);
 
-      await addDoc(collection(db, "activities"), {
+      const activityData = sanitizeObject({
         userId: user.uid,
         userName: user.displayName || "Anonymous",
         type: "ADD",
@@ -204,6 +221,7 @@ export default function AddWebtoon({ user }) {
         details: "added a new Webtoon to the library.",
         createdAt: new Date().toISOString()
       });
+      await addDoc(collection(db, "activities"), activityData);
 
       navigate("/");
     } catch (error) {
@@ -512,17 +530,6 @@ export default function AddWebtoon({ user }) {
                   type="number"
                   name="myProgress"
                   value={form.myProgress}
-                  onChange={handleChange}
-                  min="0"
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Adri's Progress</label>
-                <input
-                  type="number"
-                  name="adriProgress"
-                  value={form.adriProgress}
                   onChange={handleChange}
                   min="0"
                   className={inputClass}

@@ -6,6 +6,28 @@ import { Search as SearchIcon, UserPlus, Check, Loader2 } from "lucide-react";
 import { useDebounce, fuzzyMatch, sortByFuzzyScore } from "../hooks/useDebounce";
 import { useCache } from "../hooks/useCache";
 
+// Helper function to sanitize objects before saving to Firestore
+const sanitizeObject = (obj) => {
+  const sanitized = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) {
+      // Provide fallbacks for common fields
+      if (key === 'coverImage' || key === 'imageUrl') {
+        sanitized[key] = '';
+      } else if (key === 'title' || key === 'name' || key === 'displayName' || key === 'userName') {
+        sanitized[key] = '';
+      } else if (key === 'genre') {
+        sanitized[key] = '';
+      } else {
+        sanitized[key] = null;
+      }
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+};
+
 export default function Search({ user }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [allUsers, setAllUsers] = useState([]);
@@ -116,7 +138,7 @@ export default function Search({ user }) {
         setFollowingMap(prev => ({ ...prev, [targetUser.id]: false }));
       } else {
         // Create friend request instead of direct follow
-        await addDoc(collection(db, "followRequests"), {
+        const requestData = sanitizeObject({
           requesterId: user.uid,
           requesterName: user.displayName || "Anonymous",
           targetUserId: targetUser.id,
@@ -124,6 +146,7 @@ export default function Search({ user }) {
           status: "pending",
           createdAt: new Date().toISOString()
         });
+        await addDoc(collection(db, "followRequests"), requestData);
         setPendingRequests(prev => ({ ...prev, [targetUser.id]: true }));
       }
     } catch (error) {

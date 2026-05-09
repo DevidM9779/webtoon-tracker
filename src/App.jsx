@@ -42,7 +42,7 @@ export default function App() {
             <Route path="/search" element={<Search user={user} />} />
             <Route path="/account" element={<Account user={user} />} />
             <Route path="/add" element={<AddWebtoon user={user} />} />
-            <Route path="/webtoon/:id" element={<Detail user={user} />} />
+            <Route path="/webtoon/:userId/:webtoonId" element={<Detail user={user} />} />
             <Route path="/profile/:userId" element={<UserProfile currentUser={user} />} />
           </Routes>
         </main>

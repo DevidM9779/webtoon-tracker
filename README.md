@@ -6,7 +6,7 @@ A full-stack web application for tracking webtoon reading progress, built with R
 
 - **User Authentication**: Sign up and login with email/password
 - **Webtoon Library**: Add and manage your webtoon collection
-- **Progress Tracking**: Track reading progress for multiple users (e.g., "My Progress" and "Adri's Progress")
+- **Progress Tracking**: Track your reading progress and see friends' progress on the same webtoons
 - **Auto-fill from URL**: Scrape webtoon information from URLs using Firebase Cloud Functions
 - **Social Features**: Follow other users and see their activity in your feed
 - **Search**: Find other users by display name

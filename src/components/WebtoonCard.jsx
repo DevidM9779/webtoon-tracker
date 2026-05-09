@@ -1,11 +1,11 @@
 import { Link } from "react-router-dom";
 
-export default function WebtoonCard({ webtoon, showProgress = false, progress = 0, total = 0 }) {
+export default function WebtoonCard({ webtoon, showProgress = false, progress = 0, total = 0, userId }) {
   const progressPercent = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
 
   return (
     <Link
-      to={`/webtoon/${webtoon.id}`}
+      to={`/webtoon/${userId}/${webtoon.id}`}
       className="group bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-emerald-500/50 transition-all hover:shadow-lg hover:shadow-emerald-500/10"
     >
       <div className="aspect-[3/4] overflow-hidden bg-gray-800 relative">

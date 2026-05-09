@@ -57,6 +57,7 @@ export default function Home({ user }) {
               showProgress={true}
               progress={w.myProgress || 0}
               total={w.totalEpisodes || 0}
+              userId={user.uid}
             />
           ))}
         </div>

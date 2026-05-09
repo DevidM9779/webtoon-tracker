@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { doc, getDoc, collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
+import { doc, getDoc, collection, query, onSnapshot, orderBy } from "firebase/firestore";
 import { db } from "../firebase";
 import WebtoonCard from "../components/WebtoonCard";
 import { Loader2, Heart, BookOpen, Filter, Search } from "lucide-react";
@@ -36,26 +36,6 @@ export default function UserProfile({ currentUser }) {
           const profileData = { id: userDoc.id, ...userDoc.data() };
           setProfile(profileData);
           profileCache.set(profileData); // Cache the profile
-          
-          // Load favorite webtoons from GlobalWebtoons
-          const favoriteIds = userDoc.data().favoriteIds || [];
-          if (favoriteIds.length > 0) {
-            const favoritePromises = favoriteIds.map(async (webtoonId) => {
-              try {
-                const webtoonDoc = await getDoc(doc(db, "GlobalWebtoons", webtoonId));
-                if (webtoonDoc.exists()) {
-                  return { id: webtoonDoc.id, ...webtoonDoc.data() };
-                }
-                return null;
-              } catch (error) {
-                console.error("Error loading favorite webtoon:", error);
-                return null;
-              }
-            });
-            
-            const favorites = await Promise.all(favoritePromises);
-            setFavoriteWebtoons(favorites.filter(f => f !== null));
-          }
         }
       } catch (error) {
         console.error("Error loading profile:", error);
@@ -69,8 +49,18 @@ export default function UserProfile({ currentUser }) {
     const q = query(webtoonsRef, orderBy("createdAt", "desc"));
     
     const unsub = onSnapshot(q, (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setWebtoons(items);
+      try {
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setWebtoons(items);
+        setLoading(false);
+      } catch (error) {
+        console.error("Error processing webtoons:", error);
+        setWebtoons([]);
+        setLoading(false);
+      }
+    }, (error) => {
+      console.error("Error loading webtoons:", error);
+      setWebtoons([]);
       setLoading(false);
     });
 
@@ -84,18 +74,24 @@ export default function UserProfile({ currentUser }) {
     // Search filter
     if (searchQuery.trim()) {
       filtered = filtered.filter(w => 
-        w.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        w.genre.toLowerCase().includes(searchQuery.toLowerCase())
+        w && w.title && w.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        w && w.genre && w.genre.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
     // Status filter
     if (filterStatus !== "all") {
-      filtered = filtered.filter(w => w.status === filterStatus);
+      filtered = filtered.filter(w => w && w.status === filterStatus);
     }
 
     setFilteredWebtoons(filtered);
   }, [searchQuery, filterStatus, webtoons]);
+
+  // Filter favorite webtoons from the user's library
+  useEffect(() => {
+    const favorites = webtoons.filter(w => w && w.isFavorite === true);
+    setFavoriteWebtoons(favorites);
+  }, [webtoons]);
 
   if (loading) {
     return (
@@ -113,7 +109,7 @@ export default function UserProfile({ currentUser }) {
     );
   }
 
-  const favorites = profile?.favoriteIds || [];
+  // No longer using favoriteIds - favorites are now based on isFavorite field
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -121,35 +117,45 @@ export default function UserProfile({ currentUser }) {
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-8 mb-8">
         <div className="flex items-center gap-6">
           <div className="w-24 h-24 bg-emerald-600 rounded-full flex items-center justify-center text-4xl font-bold text-white">
-            {profile.displayName ? profile.displayName.charAt(0).toUpperCase() : "?"}
+            {profile.displayName && profile.displayName.charAt(0) ? profile.displayName.charAt(0).toUpperCase() : "?"}
           </div>
           <div>
-            <h1 className="text-3xl font-bold">{profile.displayName}</h1>
+            <h1 className="text-3xl font-bold">{profile.displayName || 'Anonymous User'}</h1>
             <div className="flex gap-6 mt-2 text-gray-400">
               <span className="flex items-center gap-2">
                 <BookOpen size={18} /> {webtoons.length} Tracked
-              </span>
-              <span className="flex items-center gap-2">
-                <Heart size={18} /> {favorites.length} Favorites
               </span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Favorites Carousel */}
+      {/* Favorites Grid */}
       {favoriteWebtoons.length > 0 && (
         <div className="mb-8">
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
             <Heart className="text-red-500" size={20} /> Favorites
           </h2>
-          <div className="flex gap-4 overflow-x-auto pb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {favoriteWebtoons.map((fav) => (
-              <div key={fav.id} className="flex-shrink-0 w-32">
-                <WebtoonCard 
-                  webtoon={fav} 
-                  showProgress={false}
-                />
+              <div key={fav.id} className="bg-gray-900 rounded-xl overflow-hidden border border-gray-800">
+                <div className="aspect-[3/4] overflow-hidden bg-gray-800 relative">
+                  {fav.coverImage ? (
+                    <img
+                      src={fav.coverImage}
+                      alt={fav.title || 'Unknown'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-500 text-sm">
+                      No Cover
+                    </div>
+                  )}
+                </div>
+                <div className="p-3">
+                  <h3 className="font-semibold text-sm truncate text-white">{fav.title || 'Unknown'}</h3>
+                  <p className="text-xs text-gray-400 mt-1 truncate">{fav.genre || 'Unknown'}</p>
+                </div>
               </div>
             ))}
           </div>
@@ -194,13 +200,16 @@ export default function UserProfile({ currentUser }) {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {filteredWebtoons.map((webtoon) => (
-              <WebtoonCard
-                key={webtoon.id}
-                webtoon={webtoon}
-                showProgress={true}
-                progress={webtoon.myProgress || 0}
-                total={webtoon.totalEpisodes || 0}
-              />
+              webtoon && (
+                <WebtoonCard
+                  key={webtoon.id}
+                  webtoon={webtoon}
+                  showProgress={true}
+                  progress={webtoon.myProgress || 0}
+                  total={webtoon.totalEpisodes || 0}
+                  userId={userId}
+                />
+              )
             ))}
           </div>
         )}

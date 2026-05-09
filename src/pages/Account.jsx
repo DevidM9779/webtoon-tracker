@@ -1,13 +1,34 @@
 import { useEffect, useState } from "react";
 import { auth } from "../firebase";
 import { signOut } from "firebase/auth";
-import { collection, query, onSnapshot, getDoc, doc, updateDoc, arrayUnion, arrayRemove, deleteDoc, setDoc } from "firebase/firestore";
+import { collection, query, onSnapshot, doc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { User, Mail, LogOut, Shield, Heart, Loader2 } from "lucide-react";
 
+// Helper function to sanitize objects before saving to Firestore
+const sanitizeObject = (obj) => {
+  const sanitized = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) {
+      // Provide fallbacks for common fields
+      if (key === 'coverImage' || key === 'imageUrl') {
+        sanitized[key] = '';
+      } else if (key === 'title' || key === 'name' || key === 'displayName' || key === 'userName') {
+        sanitized[key] = '';
+      } else if (key === 'genre') {
+        sanitized[key] = '';
+      } else {
+        sanitized[key] = null;
+      }
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+};
+
 export default function Account({ user }) {
   const [webtoons, setWebtoons] = useState([]);
-  const [favoriteIds, setFavoriteIds] = useState([]);
   const [loading, setLoading] = useState(true);
   
   useEffect(() => {
@@ -21,20 +42,6 @@ export default function Account({ user }) {
       setLoading(false);
     });
     
-    // Load user's favorite IDs
-    const loadFavorites = async () => {
-      try {
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          setFavoriteIds(userData.favoriteIds || []);
-        }
-      } catch (error) {
-        console.error("Error loading favorites:", error);
-      }
-    };
-    loadFavorites();
-    
     return () => unsub();
   }, [user]);
 
@@ -43,54 +50,12 @@ export default function Account({ user }) {
       const webtoon = webtoons.find(w => w.id === webtoonId);
       if (!webtoon) return;
 
-      const globalWebtoonId = webtoon.webtoonId || webtoon.id; // Use webtoonId if available, otherwise use doc ID
-      
-      // Update user's favoriteIds array (limit to 5)
-      const userDocRef = doc(db, "users", user.uid);
-      if (isFavorite) {
-        // Remove from favorites
-        await updateDoc(userDocRef, {
-          favoriteIds: arrayRemove(globalWebtoonId)
-        });
-        setFavoriteIds(prev => prev.filter(id => id !== globalWebtoonId));
-        
-        // Try to remove from GlobalWebtoons favoritedBy subcollection (best effort)
-        try {
-          const favoritedByRef = doc(db, "GlobalWebtoons", globalWebtoonId, "favoritedBy", user.uid);
-          await deleteDoc(favoritedByRef);
-        } catch (globalError) {
-          console.warn("Could not remove from GlobalWebtoons favoritedBy:", globalError);
-          // Don't fail the whole operation if this part fails
-        }
-      } else {
-        // Add to favorites (limit to 5)
-        const userDoc = await getDoc(userDocRef);
-        const userData = userDoc.data();
-        const currentFavorites = userData.favoriteIds || [];
-        
-        if (currentFavorites.length >= 5) {
-          alert("You can only have up to 5 favorites");
-          return;
-        }
-        
-        await updateDoc(userDocRef, {
-          favoriteIds: arrayUnion(globalWebtoonId)
-        });
-        setFavoriteIds(prev => [...prev, globalWebtoonId]);
-        
-        // Try to add to GlobalWebtoons favoritedBy subcollection (best effort)
-        try {
-          const favoritedByRef = doc(db, "GlobalWebtoons", globalWebtoonId, "favoritedBy", user.uid);
-          await setDoc(favoritedByRef, {
-            userId: user.uid,
-            userName: user.displayName || "Anonymous",
-            favoritedAt: new Date().toISOString()
-          });
-        } catch (globalError) {
-          console.warn("Could not add to GlobalWebtoons favoritedBy:", globalError);
-          // Don't fail the whole operation if this part fails
-        }
-      }
+      // Update the isFavorite field on the webtoon document
+      const webtoonRef = doc(db, `userLibraries/${user.uid}/webtoons`, webtoonId);
+      const updateData = sanitizeObject({
+        isFavorite: !isFavorite
+      });
+      await updateDoc(webtoonRef, updateData);
     } catch (error) {
       console.error("Error updating favorites:", error);
       alert("Failed to update favorites");
@@ -157,7 +122,7 @@ export default function Account({ user }) {
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 mt-6">
         <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
           <Heart className="text-red-500" size={20} />
-          Favorites (Top 5)
+          Favorites
         </h2>
         
         {loading ? (
@@ -169,8 +134,7 @@ export default function Account({ user }) {
         ) : (
           <div className="space-y-3">
             {webtoons.map((webtoon) => {
-              const webtoonIdToCheck = webtoon.webtoonId || webtoon.id;
-              const isFavorite = favoriteIds.includes(webtoonIdToCheck);
+              const isFavorite = webtoon.isFavorite || false;
               return (
                 <div key={webtoon.id} className="flex items-center justify-between bg-gray-800/50 p-3 rounded-lg">
                   <div className="flex items-center gap-3">

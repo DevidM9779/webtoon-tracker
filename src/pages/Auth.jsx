@@ -4,6 +4,28 @@ import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfi
 import { doc, setDoc } from "firebase/firestore";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 
+// Helper function to sanitize objects before saving to Firestore
+const sanitizeObject = (obj) => {
+  const sanitized = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) {
+      // Provide fallbacks for common fields
+      if (key === 'coverImage' || key === 'imageUrl') {
+        sanitized[key] = '';
+      } else if (key === 'title' || key === 'name' || key === 'displayName' || key === 'userName') {
+        sanitized[key] = '';
+      } else if (key === 'genre') {
+        sanitized[key] = '';
+      } else {
+        sanitized[key] = null;
+      }
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+};
+
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
@@ -58,13 +80,13 @@ export default function Auth() {
         await updateProfile(user, { displayName: name });
         
         // Create social profile in Firestore
-        await setDoc(doc(db, "users", user.uid), {
+        const userData = sanitizeObject({
           displayName: name,
           email: email,
           stats: { tracked: 0, episodesRead: 0, finished: 0 },
-          favoriteIds: [],
           createdAt: new Date().toISOString()
         });
+        await setDoc(doc(db, "users", user.uid), userData);
       }
     } catch (err) {
       // Provide more user-friendly error messages
