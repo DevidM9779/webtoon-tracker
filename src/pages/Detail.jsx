@@ -27,6 +27,7 @@ const sanitizeObject = (obj) => {
   return sanitized;
 };
 
+
 export default function Detail({ user }) {
   const { userId, webtoonId } = useParams();
   const navigate = useNavigate();
