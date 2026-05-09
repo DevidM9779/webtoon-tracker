@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, addDoc, getDocs, query, where } from "firebase/firestore";
+import { collection, addDoc, getDocs, query, where, getDoc, doc } from "firebase/firestore";
 import { db } from "../firebase";
 import { Search, Loader2, Save, Globe, FileText, Plus } from "lucide-react";
 
@@ -57,18 +57,33 @@ export default function AddWebtoon({ user }) {
   };
 
   // Select webtoon from search results
-  const handleSelectWebtoon = (webtoon) => {
-    setForm({
-      ...form,
-      title: webtoon.title,
-      genre: webtoon.genre,
-      coverImage: webtoon.coverImage,
-      totalEpisodes: String(webtoon.totalEpisodes),
-      webtoonId: webtoon.id,
-      sourceUrl: webtoon.sourceUrl || "",
-      isManual: false,
-    });
-    setStep("confirm");
+  const handleSelectWebtoon = async (webtoon) => {
+    try {
+      // Check if webtoon already exists in user's library
+      const userLibraryRef = collection(db, `userLibraries/${user.uid}/webtoons`);
+      const duplicateCheck = query(userLibraryRef, where("webtoonId", "==", webtoon.id));
+      const duplicateSnapshot = await getDocs(duplicateCheck);
+      
+      if (!duplicateSnapshot.empty) {
+        alert("This webtoon already exists in your collection!");
+        return;
+      }
+
+      setForm({
+        ...form,
+        title: webtoon.title,
+        genre: webtoon.genre,
+        coverImage: webtoon.coverImage,
+        totalEpisodes: String(webtoon.totalEpisodes),
+        webtoonId: webtoon.id,
+        sourceUrl: webtoon.sourceUrl || "",
+        isManual: false,
+      });
+      setStep("confirm");
+    } catch (error) {
+      console.error("Error checking for duplicates:", error);
+      alert("Failed to validate webtoon. Please try again.");
+    }
   };
 
   // URL Scrape Handler
@@ -149,7 +164,27 @@ export default function AddWebtoon({ user }) {
       return;
     }
 
+    // Check if webtoon already exists in user's library
     try {
+      const userLibraryRef = collection(db, `userLibraries/${user.uid}/webtoons`);
+      let duplicateCheck;
+      
+      if (form.webtoonId) {
+        // Check by webtoonId for scraped webtoons
+        duplicateCheck = query(userLibraryRef, where("webtoonId", "==", form.webtoonId));
+      } else {
+        // Check by title for manual entries
+        duplicateCheck = query(userLibraryRef, where("title", "==", form.title));
+      }
+      
+      const duplicateSnapshot = await getDocs(duplicateCheck);
+      
+      if (!duplicateSnapshot.empty) {
+        alert("This webtoon already exists in your collection!");
+        return;
+      }
+
+      // Add the webtoon to user's library
       const docRef = await addDoc(collection(db, `userLibraries/${user.uid}/webtoons`), {
         ...form,
         userId: user.uid,
@@ -173,6 +208,10 @@ export default function AddWebtoon({ user }) {
       navigate("/");
     } catch (error) {
       console.error("Error adding webtoon:", error);
+      if (error.message.includes("already exists")) {
+        // This is our custom error message, don't show it again
+        return;
+      }
       alert("Failed to add webtoon. Please try again.");
     }
   };
