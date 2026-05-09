@@ -3,61 +3,55 @@ import { useParams, useNavigate } from "react-router-dom";
 import { doc, onSnapshot, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import StarRating from "../components/StarRating";
-import { ArrowLeft, Loader2, Trash2, BookOpen, User } from "lucide-react";
+import { ArrowLeft, Loader2, Trash2, BookOpen, User, RefreshCw, Link as LinkIcon } from "lucide-react";
 
-export default function Detail() {
+export default function Detail({ user }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const [webtoon, setWebtoon] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [imageError, setImageError] = useState(false);
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [editingUrl, setEditingUrl] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, "webtoons", id), (snap) => {
+    if (!user) return;
+    const unsub = onSnapshot(doc(db, `userLibraries/${user.uid}/webtoons`, id), (snap) => {
       if (snap.exists()) {
         setWebtoon({ id: snap.id, ...snap.data() });
+        setSourceUrl(snap.data().sourceUrl || "");
       } else {
         setWebtoon(null);
       }
       setLoading(false);
     });
     return () => unsub();
-  }, [id]);
+  }, [id, user]);
 
   const handleUpdate = async (field, value) => {
     // 1. Don't do anything if the value hasn't actually changed
     if (webtoon[field] === value) return;
 
-    // 2. Update the main webtoon document
-    await updateDoc(doc(db, "webtoons", id), { [field]: value });
+    // 2. Update the main webtoon document in user's library
+    await updateDoc(doc(db, `userLibraries/${user.uid}/webtoons`, id), { [field]: value });
 
-    // 3. Generate the social feed activity
+    // 3. Generate the social feed activity (only for major milestones)
     let type = "";
     let details = "";
-    let actorName = "";
+    let actorName = user.displayName || "Anonymous";
 
-    if (field === 'myProgress') {
-      type = "PROGRESS";
-      details = `read up to episode ${value}`;
-      actorName = "Justin"; // The person doing the action
-    } else if (field === 'adriProgress') {
-      type = "PROGRESS";
-      details = `read up to episode ${value}`;
-      actorName = "Adri";
-    } else if (field === 'status' && value === 'Completed') {
+    if (field === 'status' && value === 'Completed') {
       type = "COMPLETE";
       details = "marked the series as completed!";
-      actorName = "Justin"; // Defaulting to you for general actions until Auth is added
-    } else if (field === 'rating') {
-      type = "RATING";
-      details = `rated the series ${value} stars`;
-      actorName = "Justin";
     }
+    // Removed progress and rating activities - only major milestones now
 
     // 4. Save to the activities collection
     if (type) {
       import("firebase/firestore").then(({ collection, addDoc }) => {
         addDoc(collection(db, "activities"), {
-          userId: actorName.toLowerCase(),
+          userId: user.uid,
           userName: actorName,
           type,
           webtoonId: id,
@@ -71,8 +65,62 @@ export default function Detail() {
 
   const handleDelete = async () => {
     if (window.confirm("Delete this webtoon from the library?")) {
-      await deleteDoc(doc(db, "webtoons", id));
+      await deleteDoc(doc(db, `userLibraries/${user.uid}/webtoons`, id));
       navigate("/");
+    }
+  };
+
+  const handleRefreshMetadata = async () => {
+    if (!webtoon.webtoonId && !webtoon.sourceUrl) {
+      alert("Cannot refresh metadata - no webtoon ID or source URL found. Please try scraping again.");
+      return;
+    }
+
+    setRefreshing(true);
+    try {
+      let res;
+      if (webtoon.webtoonId) {
+        res = await fetch(
+          `https://us-central1-webtoon-tracker-demo.cloudfunctions.net/refreshWebtoonMetadata?webtoonId=${webtoon.webtoonId}`
+        );
+      } else if (webtoon.sourceUrl) {
+        // Fallback to scraping if we have a source URL but no webtoonId
+        res = await fetch(
+          `https://us-central1-webtoon-tracker-demo.cloudfunctions.net/scrapeWebtoon?url=${encodeURIComponent(webtoon.sourceUrl)}`
+        );
+      }
+      
+      const data = await res.json();
+
+      if (data.error) {
+        alert(data.error);
+      } else {
+        // Update the webtoon document with refreshed metadata
+        await updateDoc(doc(db, `userLibraries/${user.uid}/webtoons`, id), {
+          title: data.title,
+          genre: data.genre,
+          coverImage: data.coverImage,
+          totalEpisodes: data.totalEpisodes,
+          sourceUrl: data.sourceUrl || webtoon.sourceUrl,
+          webtoonId: data.webtoonId || webtoon.webtoonId, // Update webtoonId if provided
+        });
+        alert("Metadata refreshed successfully!");
+      }
+    } catch (error) {
+      console.error("Refresh error:", error);
+      alert("Failed to refresh metadata. Please try again.");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleSaveSourceUrl = async () => {
+    try {
+      await updateDoc(doc(db, "webtoons", id), { sourceUrl });
+      setEditingUrl(false);
+    } catch (error) {
+      console.error("Error saving source URL:", error);
+      alert("Failed to save source URL.");
     }
   };
 
@@ -110,11 +158,12 @@ export default function Detail() {
       <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
         <div className="md:flex">
           <div className="md:w-56 flex-shrink-0 bg-gray-800">
-            {webtoon.coverImage ? (
+            {webtoon.coverImage && !imageError ? (
               <img
                 src={webtoon.coverImage}
                 alt={webtoon.title}
                 className="w-full h-72 md:h-full object-cover"
+                onError={() => setImageError(true)}
               />
             ) : (
               <div className="w-full h-72 md:h-full flex items-center justify-center text-gray-500">
@@ -126,16 +175,85 @@ export default function Detail() {
           <div className="flex-1 p-6">
             <div className="flex items-start justify-between">
               <div>
-                <h1 className="text-2xl font-bold">{webtoon.title}</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-2xl font-bold">{webtoon.title}</h1>
+                  {webtoon.isManual && (
+                    <span className="px-2 py-1 bg-gray-700 text-gray-300 text-xs rounded-full">
+                      Manual Entry
+                    </span>
+                  )}
+                </div>
                 <p className="text-gray-400 mt-1">{webtoon.genre}</p>
               </div>
-              <button
-                onClick={handleDelete}
-                className="text-gray-500 hover:text-red-400 transition-colors p-2"
-                title="Delete"
-              >
-                <Trash2 size={20} />
-              </button>
+              <div className="flex gap-2">
+                {/* Only show refresh button if webtoon was not manually entered */}
+                {!webtoon.isManual && (
+                  <button
+                    onClick={handleRefreshMetadata}
+                    disabled={refreshing}
+                    className="text-gray-500 hover:text-emerald-400 transition-colors p-2"
+                    title="Refresh Metadata"
+                  >
+                    {refreshing ? <Loader2 size={20} className="animate-spin" /> : <RefreshCw size={20} />}
+                  </button>
+                )}
+                <button
+                  onClick={handleDelete}
+                  className="text-gray-500 hover:text-red-400 transition-colors p-2"
+                  title="Delete"
+                >
+                  <Trash2 size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Source URL Section */}
+            <div className="mt-4 bg-gray-800/50 rounded-lg p-3">
+              <div className="flex items-center gap-2 text-sm text-gray-400 mb-2">
+                <LinkIcon size={16} />
+                <span>Source URL</span>
+              </div>
+              {editingUrl ? (
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={sourceUrl}
+                    onChange={(e) => setSourceUrl(e.target.value)}
+                    className="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+                    placeholder="https://..."
+                  />
+                  <button
+                    onClick={handleSaveSourceUrl}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded text-sm"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSourceUrl(webtoon.sourceUrl || "");
+                      setEditingUrl(false);
+                    }}
+                    className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <input
+                    type="text"
+                    value={sourceUrl || "No source URL"}
+                    readOnly
+                    className="flex-1 bg-gray-700/50 border border-gray-600 rounded px-3 py-2 text-gray-300 text-sm"
+                  />
+                  <button
+                    onClick={() => setEditingUrl(true)}
+                    className="text-emerald-400 hover:text-emerald-300 text-sm ml-2"
+                  >
+                    Edit
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="mt-4 flex items-center gap-4">

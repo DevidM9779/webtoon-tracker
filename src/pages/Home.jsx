@@ -22,12 +22,14 @@ export default function Home({ user }) {
     rating: 0,
     myProgress: 0,
     adriProgress: 0,
+    webtoonId: "",
+    sourceUrl: "",
   });
 
   // Fetch only the logged-in user's webtoons
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, "webtoons"), where("userId", "==", user.uid));
+    const q = query(collection(db, `userLibraries/${user.uid}/webtoons`));
     const unsub = onSnapshot(q, (snapshot) => {
       const items = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setWebtoons(items);
@@ -43,10 +45,25 @@ export default function Home({ user }) {
     setScrapeError("");
 
     try {
+      console.log("Starting scrape for:", scrapeUrl);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for production
+
       const res = await fetch(
-        `http://127.0.0.1:5001/demo-webtoon-app/us-central1/scrapeWebtoon?url=${encodeURIComponent(scrapeUrl)}`
+        `https://us-central1-webtoon-tracker-demo.cloudfunctions.net/scrapeWebtoon?url=${encodeURIComponent(scrapeUrl)}`,
+        { signal: controller.signal }
       );
+      
+      clearTimeout(timeoutId);
+      console.log("Response received:", res.status);
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: `HTTP ${res.status}: ${res.statusText}` }));
+        throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
+      }
+      
       const data = await res.json();
+      console.log("Data received:", data);
 
       if (data.error) {
         setScrapeError(data.error);
@@ -57,10 +74,19 @@ export default function Home({ user }) {
           genre: data.genre || prev.genre,
           coverImage: data.coverImage || prev.coverImage,
           totalEpisodes: data.totalEpisodes ? String(data.totalEpisodes) : prev.totalEpisodes,
+          webtoonId: data.webtoonId || prev.webtoonId, // Store the global webtoon ID
+          sourceUrl: scrapeUrl, // Store the source URL
         }));
       }
-    } catch {
-      setScrapeError("Failed to connect to scraper. Make sure Firebase emulators are running.");
+    } catch (error) {
+      console.error("Scraping error:", error);
+      if (error.name === 'AbortError') {
+        setScrapeError("Request timeout. The scraping took too long. The website might be slow or blocking requests.");
+      } else if (error.message.includes("Failed to fetch")) {
+        setScrapeError("Failed to connect to the scraping service. Please check your internet connection.");
+      } else {
+        setScrapeError(error.message || "Failed to scrape the URL. Please try again.");
+      }
     } finally {
       setScraping(false);
     }
@@ -74,34 +100,58 @@ export default function Home({ user }) {
   // Submit Handler
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.title.trim()) return;
+    
+    // Validation
+    if (!form.title.trim()) {
+      alert("Title is required");
+      return;
+    }
+    if (form.totalEpisodes && parseInt(form.totalEpisodes, 10) < 0) {
+      alert("Total episodes cannot be negative");
+      return;
+    }
+    if (form.myProgress && parseInt(form.myProgress, 10) < 0) {
+      alert("My progress cannot be negative");
+      return;
+    }
+    if (form.adriProgress && parseInt(form.adriProgress, 10) < 0) {
+      alert("Adri's progress cannot be negative");
+      return;
+    }
 
-    // 1. Add Webtoon and attach it to the current user
-    const docRef = await addDoc(collection(db, "webtoons"), {
-      ...form,
-      userId: user.uid, // Tie this to the specific user!
-      totalEpisodes: parseInt(form.totalEpisodes, 10) || 0,
-      myProgress: parseInt(form.myProgress, 10) || 0,
-      adriProgress: parseInt(form.adriProgress, 10) || 0,
-      rating: form.rating,
-      createdAt: new Date().toISOString(),
-    });
+    try {
+      // 1. Add Webtoon to user's library
+      const docRef = await addDoc(collection(db, `userLibraries/${user.uid}/webtoons`), {
+        ...form,
+        userId: user.uid, // Tie this to the specific user!
+        totalEpisodes: parseInt(form.totalEpisodes, 10) || 0,
+        myProgress: parseInt(form.myProgress, 10) || 0,
+        adriProgress: parseInt(form.adriProgress, 10) || 0,
+        rating: form.rating,
+        webtoonId: form.webtoonId || null, // Store global webtoon ID
+        sourceUrl: form.sourceUrl || "", // Store source URL
+        createdAt: new Date().toISOString(),
+      });
 
-    // 2. Create the social feed post so followers see it
-    await addDoc(collection(db, "activities"), {
-      userId: user.uid,
-      userName: user.displayName,
-      type: "ADD",
-      webtoonId: docRef.id,
-      webtoonTitle: form.title,
-      details: "added a new Webtoon to the library.",
-      createdAt: new Date().toISOString()
-    });
+    // 2. Create the social feed post so followers see it (only for major milestones)
+      await addDoc(collection(db, "activities"), {
+        userId: user.uid,
+        userName: user.displayName,
+        type: "ADD",
+        webtoonId: docRef.id,
+        webtoonTitle: form.title,
+        details: "added a new Webtoon to the library.",
+        createdAt: new Date().toISOString()
+      });
 
-    // Reset form and close
-    setForm({ title: "", genre: "", coverImage: "", totalEpisodes: "", status: "Ongoing", rating: 0, myProgress: 0, adriProgress: 0 });
-    setScrapeUrl("");
-    setShowAddForm(false);
+      // Reset form and close
+      setForm({ title: "", genre: "", coverImage: "", totalEpisodes: "", status: "Ongoing", rating: 0, myProgress: 0, adriProgress: 0, webtoonId: "", sourceUrl: "" });
+      setScrapeUrl("");
+      setShowAddForm(false);
+    } catch (error) {
+      console.error("Error adding webtoon:", error);
+      alert("Failed to add webtoon. Please try again.");
+    }
   };
 
   const inputClass = "w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500";
@@ -184,7 +234,15 @@ export default function Home({ user }) {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {webtoons.map((w) => <WebtoonCard key={w.id} webtoon={w} />)}
+          {webtoons.map((w) => (
+            <WebtoonCard 
+              key={w.id} 
+              webtoon={w} 
+              showProgress={true}
+              progress={w.myProgress || 0}
+              total={w.totalEpisodes || 0}
+            />
+          ))}
         </div>
       )}
     </div>

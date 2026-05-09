@@ -1,15 +1,24 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, addDoc } from "firebase/firestore";
+import { collection, addDoc, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { Search, Loader2, Save } from "lucide-react";
+import { Search, Loader2, Save, Globe, FileText, Plus } from "lucide-react";
 
-export default function AddWebtoon() {
+export default function AddWebtoon({ user }) {
   const navigate = useNavigate();
+  
+  // UI State
+  const [step, setStep] = useState("search"); // "search", "results", "manual", "url"
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  
+  // URL Scrape State
   const [scrapeUrl, setScrapeUrl] = useState("");
   const [scraping, setScraping] = useState(false);
   const [scrapeError, setScrapeError] = useState("");
 
+  // Manual Form State
   const [form, setForm] = useState({
     title: "",
     genre: "",
@@ -19,17 +28,71 @@ export default function AddWebtoon() {
     rating: 0,
     myProgress: 0,
     adriProgress: 0,
+    webtoonId: "",
+    sourceUrl: "",
+    isManual: false, // Track if this is manually entered
   });
 
+  // Search GlobalWebtoons
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setSearchLoading(true);
+    
+    try {
+      const q = query(
+        collection(db, "GlobalWebtoons"),
+        where("title", ">=", searchQuery),
+        where("title", "<=", searchQuery + "\uf8ff")
+      );
+      const snapshot = await getDocs(q);
+      const results = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setSearchResults(results);
+      setStep(results.length > 0 ? "results" : "notFound");
+    } catch (error) {
+      console.error("Search error:", error);
+      alert("Failed to search library");
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  // Select webtoon from search results
+  const handleSelectWebtoon = (webtoon) => {
+    setForm({
+      ...form,
+      title: webtoon.title,
+      genre: webtoon.genre,
+      coverImage: webtoon.coverImage,
+      totalEpisodes: String(webtoon.totalEpisodes),
+      webtoonId: webtoon.id,
+      sourceUrl: webtoon.sourceUrl || "",
+      isManual: false,
+    });
+    setStep("confirm");
+  };
+
+  // URL Scrape Handler
   const handleScrape = async () => {
     if (!scrapeUrl.trim()) return;
     setScraping(true);
     setScrapeError("");
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
       const res = await fetch(
-        `http://127.0.0.1:5001/demo-webtoon-app/us-central1/scrapeWebtoon?url=${encodeURIComponent(scrapeUrl)}`
+        `https://us-central1-webtoon-tracker-demo.cloudfunctions.net/scrapeWebtoon?url=${encodeURIComponent(scrapeUrl)}`,
+        { signal: controller.signal }
       );
+      
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: `HTTP ${res.status}: ${res.statusText}` }));
+        throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
+      }
+      
       const data = await res.json();
 
       if (data.error) {
@@ -41,10 +104,21 @@ export default function AddWebtoon() {
           genre: data.genre || prev.genre,
           coverImage: data.coverImage || prev.coverImage,
           totalEpisodes: data.totalEpisodes ? String(data.totalEpisodes) : prev.totalEpisodes,
+          webtoonId: data.webtoonId || prev.webtoonId,
+          sourceUrl: scrapeUrl,
+          isManual: false,
         }));
+        setStep("confirm");
       }
-    } catch {
-      setScrapeError("Failed to connect to scraper. Make sure Firebase emulators are running.");
+    } catch (error) {
+      console.error("Scraping error:", error);
+      if (error.name === 'AbortError') {
+        setScrapeError("Request timeout. The scraping took too long.");
+      } else if (error.message.includes("Failed to fetch")) {
+        setScrapeError("Failed to connect to the scraping service.");
+      } else {
+        setScrapeError(error.message || "Failed to scrape the URL.");
+      }
     } finally {
       setScraping(false);
     }
@@ -57,143 +131,373 @@ export default function AddWebtoon() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.title.trim()) return;
+    
+    if (!form.title.trim()) {
+      alert("Title is required");
+      return;
+    }
+    if (form.totalEpisodes && parseInt(form.totalEpisodes, 10) < 0) {
+      alert("Total episodes cannot be negative");
+      return;
+    }
+    if (form.myProgress && parseInt(form.myProgress, 10) < 0) {
+      alert("My progress cannot be negative");
+      return;
+    }
+    if (form.adriProgress && parseInt(form.adriProgress, 10) < 0) {
+      alert("Adri's progress cannot be negative");
+      return;
+    }
 
-    // 1. Add the webtoon
-    const docRef = await addDoc(collection(db, "webtoons"), {
-      ...form,
-      totalEpisodes: parseInt(form.totalEpisodes, 10) || 0,
-      myProgress: parseInt(form.myProgress, 10) || 0,
-      adriProgress: parseInt(form.adriProgress, 10) || 0,
-      rating: form.rating,
-      createdAt: new Date().toISOString(),
-    });
+    try {
+      const docRef = await addDoc(collection(db, `userLibraries/${user.uid}/webtoons`), {
+        ...form,
+        userId: user.uid,
+        totalEpisodes: parseInt(form.totalEpisodes, 10) || 0,
+        myProgress: parseInt(form.myProgress, 10) || 0,
+        adriProgress: parseInt(form.adriProgress, 10) || 0,
+        rating: form.rating,
+        createdAt: new Date().toISOString(),
+      });
 
-    // 2. Create the social feed post
-    await addDoc(collection(db, "activities"), {
-      userId: "justin", // Mock user ID
-      userName: "Justin", // Mock user name
-      type: "ADD",
-      webtoonId: docRef.id,
-      webtoonTitle: form.title,
-      details: "added a new Webtoon to the library.",
-      createdAt: new Date().toISOString()
-    });
+      await addDoc(collection(db, "activities"), {
+        userId: user.uid,
+        userName: user.displayName || "Anonymous",
+        type: "ADD",
+        webtoonId: docRef.id,
+        webtoonTitle: form.title,
+        details: "added a new Webtoon to the library.",
+        createdAt: new Date().toISOString()
+      });
 
-    navigate("/");
+      navigate("/");
+    } catch (error) {
+      console.error("Error adding webtoon:", error);
+      alert("Failed to add webtoon. Please try again.");
+    }
   };
 
-  const inputClass =
-    "w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors";
+  const inputClass = "w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors";
 
   return (
     <div className="max-w-2xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Add New Webtoon</h1>
 
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-6">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
-          Auto-fill from URL
-        </h2>
-        <div className="flex gap-2">
-          <input
-            type="url"
-            value={scrapeUrl}
-            onChange={(e) => setScrapeUrl(e.target.value)}
-            placeholder="Paste a Webtoon URL..."
-            className={inputClass}
-          />
+      {/* Step 1: Search GlobalWebtoons */}
+      {step === "search" && (
+        <div className="space-y-6">
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+              Search Webtoon Tracker Library
+            </h2>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Search by title..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                className={inputClass}
+              />
+              <button
+                onClick={handleSearch}
+                disabled={searchLoading}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 rounded-lg font-medium transition-colors disabled:opacity-50"
+              >
+                {searchLoading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} />}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <button
+              onClick={() => setStep("url")}
+              className="bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-emerald-500 transition-colors text-left"
+            >
+              <Globe className="text-emerald-400 mb-3" size={32} />
+              <h3 className="font-semibold text-white mb-1">Fetch from URL</h3>
+              <p className="text-sm text-gray-400">Scrape webtoon data from a URL</p>
+            </button>
+            <button
+              onClick={() => setStep("manual")}
+              className="bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-emerald-500 transition-colors text-left"
+            >
+              <FileText className="text-emerald-400 mb-3" size={32} />
+              <h3 className="font-semibold text-white mb-1">Enter Manually</h3>
+              <p className="text-sm text-gray-400">Add webtoon details manually</p>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Step 2: Search Results */}
+      {step === "results" && (
+        <div className="space-y-4">
+          <button onClick={() => setStep("search")} className="text-gray-400 hover:text-white mb-4">
+            ← Back to search
+          </button>
+          <h2 className="text-lg font-semibold">Found {searchResults.length} webtoon(s)</h2>
+          <div className="space-y-3">
+            {searchResults.map((webtoon) => (
+              <div
+                key={webtoon.id}
+                onClick={() => handleSelectWebtoon(webtoon)}
+                className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:border-emerald-500 transition-colors"
+              >
+                {webtoon.coverImage && (
+                  <img src={webtoon.coverImage} alt={webtoon.title} className="w-16 h-20 object-cover rounded" />
+                )}
+                <div className="flex-1">
+                  <h3 className="font-semibold text-white">{webtoon.title}</h3>
+                  <p className="text-sm text-gray-400">{webtoon.genre}</p>
+                  <p className="text-sm text-gray-500">{webtoon.totalEpisodes} episodes</p>
+                </div>
+                <Plus className="text-emerald-400" size={24} />
+              </div>
+            ))}
+          </div>
           <button
-            type="button"
-            onClick={handleScrape}
-            disabled={scraping}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors whitespace-nowrap"
+            onClick={() => setStep("url")}
+            className="w-full text-center text-gray-400 hover:text-white py-4"
           >
-            {scraping ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
-            Fetch Data
+            Not found? Try fetching from URL or enter manually
           </button>
         </div>
-        {scrapeError && (
-          <p className="mt-2 text-sm text-red-400">{scrapeError}</p>
-        )}
-      </div>
+      )}
 
-      <form onSubmit={handleSubmit} className="bg-gray-900 rounded-xl border border-gray-800 p-6 space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">Title *</label>
-          <input name="title" value={form.title} onChange={handleChange} className={inputClass} required />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">Genre</label>
-          <input name="genre" value={form.genre} onChange={handleChange} className={inputClass} />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">Cover Image URL</label>
-          <input name="coverImage" value={form.coverImage} onChange={handleChange} className={inputClass} />
-          {form.coverImage && (
-            <img
-              src={form.coverImage}
-              alt="Preview"
-              className="mt-2 w-32 h-44 object-cover rounded-lg border border-gray-700"
-            />
-          )}
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Total Episodes</label>
-            <input
-              name="totalEpisodes"
-              type="number"
-              min="0"
-              value={form.totalEpisodes}
-              onChange={handleChange}
-              className={inputClass}
-            />
+      {/* Step 3: Not Found */}
+      {step === "notFound" && (
+        <div className="space-y-4">
+          <button onClick={() => setStep("search")} className="text-gray-400 hover:text-white mb-4">
+            ← Back to search
+          </button>
+          <div className="text-center py-8 bg-gray-900 rounded-xl border border-gray-800">
+            <Search className="mx-auto text-gray-600 mb-4" size={48} />
+            <p className="text-gray-400 mb-4">No webtoons found matching "{searchQuery}"</p>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Status</label>
-            <select name="status" value={form.status} onChange={handleChange} className={inputClass}>
-              <option value="Ongoing">Ongoing</option>
-              <option value="Completed">Completed</option>
-            </select>
+          <div className="grid grid-cols-2 gap-4">
+            <button
+              onClick={() => setStep("url")}
+              className="bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-emerald-500 transition-colors text-left"
+            >
+              <Globe className="text-emerald-400 mb-3" size={32} />
+              <h3 className="font-semibold text-white mb-1">Fetch from URL</h3>
+              <p className="text-sm text-gray-400">Scrape webtoon data from a URL</p>
+            </button>
+            <button
+              onClick={() => setStep("manual")}
+              className="bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-emerald-500 transition-colors text-left"
+            >
+              <FileText className="text-emerald-400 mb-3" size={32} />
+              <h3 className="font-semibold text-white mb-1">Enter Manually</h3>
+              <p className="text-sm text-gray-400">Add webtoon details manually</p>
+            </button>
           </div>
         </div>
+      )}
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">My Progress (Episode)</label>
-            <input
-              name="myProgress"
-              type="number"
-              min="0"
-              value={form.myProgress}
-              onChange={handleChange}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">{"Adri's Progress (Episode)"}</label>
-            <input
-              name="adriProgress"
-              type="number"
-              min="0"
-              value={form.adriProgress}
-              onChange={handleChange}
-              className={inputClass}
-            />
+      {/* Step 4: URL Scrape */}
+      {step === "url" && (
+        <div className="space-y-6">
+          <button onClick={() => setStep("search")} className="text-gray-400 hover:text-white mb-4">
+            ← Back to search
+          </button>
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+              Fetch from URL
+            </h2>
+            <div className="flex gap-2">
+              <input
+                type="url"
+                placeholder="Enter webtoon URL..."
+                value={scrapeUrl}
+                onChange={(e) => setScrapeUrl(e.target.value)}
+                className={inputClass}
+              />
+              <button
+                onClick={handleScrape}
+                disabled={scraping}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 rounded-lg font-medium transition-colors disabled:opacity-50"
+              >
+                {scraping ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} />}
+              </button>
+            </div>
+            {scrapeError && <p className="text-red-400 text-sm mt-2">{scrapeError}</p>}
           </div>
         </div>
+      )}
 
-        <button
-          type="submit"
-          className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-lg font-semibold transition-colors mt-2"
-        >
-          <Save size={18} />
-          Save to Library
-        </button>
-      </form>
+      {/* Step 5: Manual Entry */}
+      {step === "manual" && (
+        <div className="space-y-6">
+          <button onClick={() => setStep("search")} className="text-gray-400 hover:text-white mb-4">
+            ← Back to search
+          </button>
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">
+              Manual Entry
+            </h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Title *</label>
+                <input
+                  type="text"
+                  name="title"
+                  value={form.title}
+                  onChange={handleChange}
+                  required
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Genre</label>
+                <input
+                  type="text"
+                  name="genre"
+                  value={form.genre}
+                  onChange={handleChange}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Cover Image URL</label>
+                <input
+                  type="url"
+                  name="coverImage"
+                  value={form.coverImage}
+                  onChange={handleChange}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Total Episodes</label>
+                <input
+                  type="number"
+                  name="totalEpisodes"
+                  value={form.totalEpisodes}
+                  onChange={handleChange}
+                  min="0"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Status</label>
+                <select
+                  name="status"
+                  value={form.status}
+                  onChange={handleChange}
+                  className={inputClass}
+                >
+                  <option value="Ongoing">Ongoing</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Hiatus">Hiatus</option>
+                </select>
+              </div>
+              <div className="flex gap-4">
+                <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-medium transition-colors">
+                  <Save size={18} className="inline mr-2" /> Add Webtoon
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Step 6: Confirm & Edit */}
+      {step === "confirm" && (
+        <div className="space-y-6">
+          <button onClick={() => setStep("search")} className="text-gray-400 hover:text-white mb-4">
+            ← Start over
+          </button>
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+            <h2 className="text-lg font-semibold mb-4">Confirm Webtoon Details</h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Title *</label>
+                <input
+                  type="text"
+                  name="title"
+                  value={form.title}
+                  onChange={handleChange}
+                  required
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Genre</label>
+                <input
+                  type="text"
+                  name="genre"
+                  value={form.genre}
+                  onChange={handleChange}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Cover Image URL</label>
+                <input
+                  type="url"
+                  name="coverImage"
+                  value={form.coverImage}
+                  onChange={handleChange}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Total Episodes</label>
+                <input
+                  type="number"
+                  name="totalEpisodes"
+                  value={form.totalEpisodes}
+                  onChange={handleChange}
+                  min="0"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Status</label>
+                <select
+                  name="status"
+                  value={form.status}
+                  onChange={handleChange}
+                  className={inputClass}
+                >
+                  <option value="Ongoing">Ongoing</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Hiatus">Hiatus</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">My Progress</label>
+                <input
+                  type="number"
+                  name="myProgress"
+                  value={form.myProgress}
+                  onChange={handleChange}
+                  min="0"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Adri's Progress</label>
+                <input
+                  type="number"
+                  name="adriProgress"
+                  value={form.adriProgress}
+                  onChange={handleChange}
+                  min="0"
+                  className={inputClass}
+                />
+              </div>
+              <div className="flex gap-4">
+                <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-medium transition-colors">
+                  <Save size={18} className="inline mr-2" /> Add Webtoon
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

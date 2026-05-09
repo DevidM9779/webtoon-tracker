@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Library, Activity, Search as SearchIcon, User } from "lucide-react";
+import { Library, Activity, Search as SearchIcon, User, Bell } from "lucide-react";
 
 export default function Navbar() {
   const location = useLocation();
@@ -15,6 +15,7 @@ export default function Navbar() {
           <Link to="/" className={`flex items-center gap-1 ${isActive('/')}`}><Library size={18}/> Collection</Link>
           <Link to="/feed" className={`flex items-center gap-1 ${isActive('/feed')}`}><Activity size={18}/> Feed</Link>
           <Link to="/search" className={`flex items-center gap-1 ${isActive('/search')}`}><SearchIcon size={18}/> Search</Link>
+          <Link to="/notifications" className={`flex items-center gap-1 ${isActive('/notifications')}`}><Bell size={18}/> Notifications</Link>
           <Link to="/account" className={`flex items-center gap-1 ${isActive('/account')}`}><User size={18}/> Account</Link>
         </div>
       </div>

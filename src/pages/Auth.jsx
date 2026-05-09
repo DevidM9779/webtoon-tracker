@@ -2,20 +2,50 @@ import { useState } from "react";
 import { auth, db } from "../firebase";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
-import { Loader2 } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+
+    // Basic validation
+    if (!email.trim()) {
+      setError("Email is required");
+      setLoading(false);
+      return;
+    }
+    if (!password.trim()) {
+      setError("Password is required");
+      setLoading(false);
+      return;
+    }
+    if (!isLogin && !name.trim()) {
+      setError("Display name is required");
+      setLoading(false);
+      return;
+    }
+    if (!isLogin && password.length < 6) {
+      setError("Password must be at least 6 characters");
+      setLoading(false);
+      return;
+    }
+    if (!isLogin && password !== confirmPassword) {
+      setError("Passwords do not match");
+      setLoading(false);
+      return;
+    }
 
     try {
       if (isLogin) {
@@ -32,17 +62,39 @@ export default function Auth() {
           displayName: name,
           email: email,
           stats: { tracked: 0, episodesRead: 0, finished: 0 },
+          favoriteIds: [],
           createdAt: new Date().toISOString()
         });
       }
     } catch (err) {
-      setError(err.message);
+      // Provide more user-friendly error messages
+      switch (err.code) {
+        case 'auth/email-already-in-use':
+          setError("An account with this email already exists");
+          break;
+        case 'auth/invalid-email':
+          setError("Invalid email address");
+          break;
+        case 'auth/weak-password':
+          setError("Password is too weak");
+          break;
+        case 'auth/user-not-found':
+          setError("No account found with this email");
+          break;
+        case 'auth/wrong-password':
+          setError("Incorrect password");
+          break;
+        default:
+          setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const inputClass = "w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white mb-4 focus:border-emerald-500 focus:outline-none";
+  
+  const passwordInputClass = "w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white mb-4 focus:border-emerald-500 focus:outline-none pr-10";
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
@@ -55,7 +107,44 @@ export default function Auth() {
             <input type="text" placeholder="Display Name" value={name} onChange={(e) => setName(e.target.value)} required className={inputClass} />
           )}
           <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required className={inputClass} />
-          <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required className={inputClass} />
+          
+          <div className="relative mb-4">
+            <input 
+              type={showPassword ? "text" : "password"} 
+              placeholder="Password" 
+              value={password} 
+              onChange={(e) => setPassword(e.target.value)} 
+              required 
+              className={passwordInputClass} 
+            />
+            <button 
+              type="button" 
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-300"
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+
+          {!isLogin && (
+            <div className="relative mb-4">
+              <input 
+                type={showConfirmPassword ? "text" : "password"} 
+                placeholder="Confirm Password" 
+                value={confirmPassword} 
+                onChange={(e) => setConfirmPassword(e.target.value)} 
+                required 
+                className={passwordInputClass} 
+              />
+              <button 
+                type="button" 
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-300"
+              >
+                {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          )}
           
           {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
           

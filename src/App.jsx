@@ -9,6 +9,9 @@ import Feed from "./pages/Feed";
 import Search from "./pages/Search";
 import Account from "./pages/Account";
 import Detail from "./pages/Detail";
+import AddWebtoon from "./pages/AddWebtoon";
+import UserProfile from "./pages/UserProfile";
+import Notifications from "./pages/Notifications";
 import { Loader2 } from "lucide-react";
 
 export default function App() {
@@ -39,7 +42,10 @@ export default function App() {
             <Route path="/feed" element={<Feed user={user} />} />
             <Route path="/search" element={<Search user={user} />} />
             <Route path="/account" element={<Account user={user} />} />
+            <Route path="/notifications" element={<Notifications user={user} />} />
+            <Route path="/add" element={<AddWebtoon user={user} />} />
             <Route path="/webtoon/:id" element={<Detail user={user} />} />
+            <Route path="/profile/:userId" element={<UserProfile currentUser={user} />} />
           </Routes>
         </main>
       </div>

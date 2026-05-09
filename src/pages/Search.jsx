@@ -1,41 +1,134 @@
-import { useState } from "react";
-import { collection, query, where, getDocs, doc, setDoc, deleteDoc } from "firebase/firestore";
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { collection, getDocs, doc, setDoc, deleteDoc, onSnapshot, addDoc, query, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { Search as SearchIcon, UserPlus, Check } from "lucide-react";
+import { Search as SearchIcon, UserPlus, Check, Loader2 } from "lucide-react";
+import { useDebounce, fuzzyMatch, sortByFuzzyScore } from "../hooks/useDebounce";
+import { useCache } from "../hooks/useCache";
 
 export default function Search({ user }) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [allUsers, setAllUsers] = useState([]);
   const [results, setResults] = useState([]);
   const [followingMap, setFollowingMap] = useState({}); // Keep track of who we follow
+  const [pendingRequests, setPendingRequests] = useState({}); // Track pending follow requests
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const debouncedQuery = useDebounce(searchQuery, 300); // 300ms debounce
+  
+  // Cache for all users list (5 minute TTL)
+  const usersCache = useCache("all_users_list", 5 * 60 * 1000);
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
+  // Load all users once
+  useEffect(() => {
+    const loadAllUsers = async () => {
+      try {
+        // Check cache first
+        const cachedUsers = usersCache.get();
+        if (cachedUsers) {
+          setAllUsers(cachedUsers);
+          setLoadingUsers(false);
+          return;
+        }
 
-    // Search users collection (case sensitive for simplicity, requires exact match locally)
-    const q = query(collection(db, "users"), where("displayName", "==", searchQuery));
-    const snapshot = await getDocs(q);
+        const snapshot = await getDocs(collection(db, "users"));
+        const users = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter(u => u.id !== user.uid); // Don't include current user
+        
+        setAllUsers(users);
+        usersCache.set(users); // Cache the users list
+        setLoadingUsers(false);
+      } catch (error) {
+        console.error("Error loading users:", error);
+        setLoadingUsers(false);
+      }
+    };
+
+    if (user) {
+      loadAllUsers();
+    }
+  }, [user, usersCache]);
+
+  // Load current following state from Firestore
+  useEffect(() => {
+    if (!user) return;
     
-    const foundUsers = snapshot.docs
-      .map(doc => ({ id: doc.id, ...doc.data() }))
-      .filter(u => u.id !== user.uid); // Don't show yourself
-      
-    setResults(foundUsers);
-  };
+    const unsub = onSnapshot(
+      collection(db, `users/${user.uid}/following`), 
+      (snap) => {
+        const map = {};
+        snap.docs.forEach(doc => {
+          map[doc.id] = true;
+        });
+        setFollowingMap(map);
+      },
+      (error) => {
+        console.error("Error loading following state:", error);
+      }
+    );
+    
+    return () => {
+      unsub();
+    };
+  }, [user]);
+
+  // Load pending follow requests
+  useEffect(() => {
+    if (!user) return;
+    
+    const q = query(
+      collection(db, "followRequests"),
+      where("requesterId", "==", user.uid),
+      where("status", "==", "pending")
+    );
+    
+    const unsub = onSnapshot(q, (snap) => {
+      const map = {};
+      snap.docs.forEach(doc => {
+        map[doc.data().targetUserId] = doc.id;
+      });
+      setPendingRequests(map);
+    });
+    
+    return () => {
+      unsub();
+    };
+  }, [user]);
+
+  // Filter users based on debounced query with fuzzy matching
+  useEffect(() => {
+    if (!debouncedQuery.trim()) {
+      setResults([]);
+      return;
+    }
+
+    const filtered = sortByFuzzyScore(allUsers, debouncedQuery);
+    setResults(filtered);
+  }, [debouncedQuery, allUsers]);
 
   const handleFollow = async (targetUser) => {
-    const followRef = doc(db, `users/${user.uid}/following`, targetUser.id);
-    
-    if (followingMap[targetUser.id]) {
-      await deleteDoc(followRef);
-      setFollowingMap(prev => ({ ...prev, [targetUser.id]: false }));
-    } else {
-      await setDoc(followRef, { 
-        userId: targetUser.id, 
-        displayName: targetUser.displayName,
-        followedAt: new Date().toISOString()
-      });
-      setFollowingMap(prev => ({ ...prev, [targetUser.id]: true }));
+    try {
+      // Check if already friends
+      if (followingMap[targetUser.id]) {
+        // Unfriend (remove from both sides)
+        await deleteDoc(doc(db, `users/${user.uid}/following`, targetUser.id));
+        await deleteDoc(doc(db, `users/${targetUser.id}/following`, user.uid));
+        setFollowingMap(prev => ({ ...prev, [targetUser.id]: false }));
+      } else {
+        // Create friend request instead of direct follow
+        await addDoc(collection(db, "followRequests"), {
+          requesterId: user.uid,
+          requesterName: user.displayName || "Anonymous",
+          targetUserId: targetUser.id,
+          targetName: targetUser.displayName,
+          status: "pending",
+          createdAt: new Date().toISOString()
+        });
+        setPendingRequests(prev => ({ ...prev, [targetUser.id]: true }));
+      }
+    } catch (error) {
+      console.error("Friend/unfriend error:", error);
+      alert("Failed to process friend request");
     }
   };
 
@@ -43,41 +136,75 @@ export default function Search({ user }) {
     <div className="max-w-2xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Find Friends</h1>
       
-      <form onSubmit={handleSearch} className="flex gap-2 mb-8">
-        <input 
-          type="text" 
-          placeholder="Search exact display name (e.g. Adri)..." 
-          value={searchQuery} 
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
-        />
-        <button type="submit" className="bg-emerald-600 px-4 py-2 rounded-lg text-white">
-          <SearchIcon size={20} />
-        </button>
-      </form>
+      <div className="flex gap-2 mb-8">
+        <div className="relative flex-1">
+          <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={20} />
+          <input 
+            type="text" 
+            placeholder="Search users (fuzzy matching enabled)..." 
+            value={searchQuery} 
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-10 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500"
+          />
+        </div>
+        {loadingUsers && <Loader2 className="text-emerald-400 animate-spin" size={24} />}
+      </div>
 
       <div className="space-y-4">
-        {results.map((profile) => (
-          <div key={profile.id} className="bg-gray-900 border border-gray-800 rounded-xl p-6 flex justify-between items-center">
-            <div>
-              <h2 className="text-xl font-bold">{profile.displayName}</h2>
-              <div className="flex gap-4 mt-2 text-sm text-gray-400">
-                <span>📚 {profile.stats?.tracked || 0} Tracked</span>
-                <span>📖 {profile.stats?.episodesRead || 0} Episodes</span>
-                <span>🏆 {profile.stats?.finished || 0} Finished</span>
-              </div>
-            </div>
-            
-            <button 
-              onClick={() => handleFollow(profile)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-                followingMap[profile.id] ? "bg-gray-800 text-white" : "bg-emerald-600 text-white hover:bg-emerald-500"
-              }`}
-            >
-              {followingMap[profile.id] ? <><Check size={18} /> Following</> : <><UserPlus size={18} /> Follow</>}
-            </button>
+        {loadingUsers ? (
+          <div className="text-center py-12">
+            <Loader2 className="mx-auto animate-spin text-emerald-400 mb-4" size={32} />
+            <p className="text-gray-400">Loading users...</p>
           </div>
-        ))}
+        ) : results.length === 0 && searchQuery ? (
+          <div className="text-center py-12 bg-gray-900 rounded-xl border border-gray-800">
+            <SearchIcon className="mx-auto text-gray-600 mb-4" size={48} />
+            <p className="text-gray-400">No users found matching "{searchQuery}"</p>
+            <p className="text-gray-500 text-sm mt-2">Try a different search term</p>
+          </div>
+        ) : results.length === 0 && !searchQuery ? (
+          <div className="text-center py-12 bg-gray-900 rounded-xl border border-gray-800">
+            <SearchIcon className="mx-auto text-gray-600 mb-4" size={48} />
+            <p className="text-gray-400">Search for friends by name</p>
+            <p className="text-gray-500 text-sm mt-2">Start typing to see matching users</p>
+          </div>
+        ) : (
+          results.map((profile) => (
+            <div key={profile.id} className="bg-gray-900 border border-gray-800 rounded-xl p-6 flex justify-between items-center">
+              <div>
+                <Link to={`/profile/${profile.id}`}>
+                  <h2 className="text-xl font-bold hover:text-emerald-400 transition-colors cursor-pointer">
+                    {profile.displayName}
+                  </h2>
+                </Link>
+                <div className="flex gap-4 mt-2 text-sm text-gray-400">
+                  <span>📚 {profile.stats?.tracked || 0} Tracked</span>
+                  <span>📖 {profile.stats?.episodesRead || 0} Episodes</span>
+                  <span>🏆 {profile.stats?.finished || 0} Finished</span>
+                </div>
+              </div>
+              
+              <button 
+                onClick={() => handleFollow(profile)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                  followingMap[profile.id] 
+                    ? "bg-gray-800 text-white" 
+                    : pendingRequests[profile.id]
+                      ? "bg-yellow-600/20 text-yellow-400 border border-yellow-500/30"
+                      : "bg-emerald-600 text-white hover:bg-emerald-500"
+                }`}
+              >
+                {followingMap[profile.id] ? (
+                  <><Check size={18} /> Friends</>
+                ) : pendingRequests[profile.id] ? (
+                  <><Loader2 size={18} className="animate-spin" /> Pending</>
+                ) : (
+                  <><UserPlus size={18} /> Add Friend</>
+                )}
+              </button>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
