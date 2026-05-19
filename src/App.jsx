@@ -35,7 +35,7 @@ export default function App() {
     <Router>
       <div className="min-h-screen bg-gray-950 text-white pb-20 md:pb-0">
         <Navbar />
-        <main className="max-w-6xl mx-auto px-4 py-8">
+        <main className="max-w-6xl mx-auto px-4 py-4 md:py-8">
           <Routes>
             <Route path="/" element={<Home user={user} />} />
             <Route path="/feed" element={<Feed user={user} />} />

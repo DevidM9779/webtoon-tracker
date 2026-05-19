@@ -236,15 +236,18 @@ export default function Detail({ user }) {
 
     setRefreshing(true);
     try {
+      // Get the current project ID from Firebase config or use a default
+      const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || "webtoon-tracker-demo";
+      
       let res;
       if (webtoon.webtoonId) {
         res = await fetch(
-          `https://us-central1-webtoon-tracker-demo.cloudfunctions.net/refreshWebtoonMetadata?webtoonId=${webtoon.webtoonId}`
+          `https://us-central1-${projectId}.cloudfunctions.net/refreshWebtoonMetadata?webtoonId=${webtoon.webtoonId}`
         );
       } else if (webtoon.sourceUrl) {
         // Fallback to scraping if we have a source URL but no webtoonId
         res = await fetch(
-          `https://us-central1-webtoon-tracker-demo.cloudfunctions.net/scrapeWebtoon?url=${encodeURIComponent(webtoon.sourceUrl)}`
+          `https://us-central1-${projectId}.cloudfunctions.net/scrapeWebtoon?url=${encodeURIComponent(webtoon.sourceUrl)}`
         );
       }
       
@@ -334,7 +337,7 @@ export default function Detail({ user }) {
     <div className="max-w-3xl mx-auto">
       <button
         onClick={() => navigate("/")}
-        className="flex items-center gap-1 text-gray-400 hover:text-white mb-6 transition-colors"
+        className="flex items-center gap-1 text-gray-400 hover:text-white mb-4 md:mb-6 transition-colors"
       >
         <ArrowLeft size={18} /> Back to Library
       </button>
@@ -346,28 +349,28 @@ export default function Detail({ user }) {
               <img
                 src={webtoon.coverImage}
                 alt={webtoon.title}
-                className="w-full h-72 md:h-full object-cover"
+                className="w-full h-64 md:h-full object-cover"
                 onError={() => setImageError(true)}
               />
             ) : (
-              <div className="w-full h-72 md:h-full flex items-center justify-center text-gray-500">
+              <div className="w-full h-64 md:h-full flex items-center justify-center text-gray-500">
                 No Cover
               </div>
             )}
           </div>
 
-          <div className="flex-1 p-6">
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-2xl font-bold">{webtoon.title}</h1>
+          <div className="flex-1 p-4 md:p-6">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="text-xl md:text-2xl font-bold">{webtoon.title}</h1>
                   {webtoon.isManual && (
                     <span className="px-2 py-1 bg-gray-700 text-gray-300 text-xs rounded-full">
                       Manual Entry
                     </span>
                   )}
                 </div>
-                <p className="text-gray-400 mt-1">{webtoon.genre}</p>
+                <p className="text-gray-400 mt-1 text-sm md:text-base">{webtoon.genre}</p>
               </div>
               <div className="flex gap-2">
                 {/* Heart toggle for favorites - only works for owner */}

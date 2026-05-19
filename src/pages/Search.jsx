@@ -157,9 +157,9 @@ export default function Search({ user }) {
 
   return (
     <div className="max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Find Friends</h1>
+      <h1 className="text-2xl font-bold mb-4 md:mb-6">Find Friends</h1>
       
-      <div className="flex gap-2 mb-8">
+      <div className="flex gap-2 mb-6 md:mb-8">
         <div className="relative flex-1">
           <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={20} />
           <input 
@@ -193,14 +193,14 @@ export default function Search({ user }) {
           </div>
         ) : (
           results.map((profile) => (
-            <div key={profile.id} className="bg-gray-900 border border-gray-800 rounded-xl p-6 flex justify-between items-center">
-              <div>
+            <div key={profile.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 md:p-6 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+              <div className="flex-1">
                 <Link to={`/profile/${profile.id}`}>
-                  <h2 className="text-xl font-bold hover:text-emerald-400 transition-colors cursor-pointer">
+                  <h2 className="text-lg md:text-xl font-bold hover:text-emerald-400 transition-colors cursor-pointer">
                     {profile.displayName}
                   </h2>
                 </Link>
-                <div className="flex gap-4 mt-2 text-sm text-gray-400">
+                <div className="flex gap-3 md:gap-4 mt-2 text-xs md:text-sm text-gray-400 flex-wrap">
                   <span>📚 {profile.stats?.tracked || 0} Tracked</span>
                   <span>📖 {profile.stats?.episodesRead || 0} Episodes</span>
                   <span>🏆 {profile.stats?.finished || 0} Finished</span>
@@ -209,7 +209,7 @@ export default function Search({ user }) {
               
               <button 
                 onClick={() => handleFollow(profile)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
                   followingMap[profile.id] 
                     ? "bg-gray-800 text-white" 
                     : pendingRequests[profile.id]

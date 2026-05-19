@@ -145,22 +145,22 @@ export default function Feed({ user }) {
 
   return (
     <div className="max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">
+      <h1 className="text-2xl font-bold mb-4 md:mb-6">
         <span className="text-emerald-400">Activity</span> Feed
       </h1>
 
       {/* Friend Requests Section */}
       {requests.length > 0 && (
-        <div className="mb-8">
+        <div className="mb-6 md:mb-8">
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <UserPlus className="text-emerald-400" size={20} />
             Friend Requests ({requests.length})
           </h2>
           <div className="space-y-3">
             {requests.map((request) => (
-              <div key={request.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex justify-between items-center">
+              <div key={request.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-emerald-600 rounded-full flex items-center justify-center text-white font-bold">
+                  <div className="w-12 h-12 bg-emerald-600 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0">
                     {request.requesterName ? request.requesterName.charAt(0).toUpperCase() : "?"}
                   </div>
                   <div>
@@ -172,13 +172,13 @@ export default function Feed({ user }) {
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleAcceptRequest(request)}
-                    className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                    className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium transition-colors"
                   >
                     <Check size={18} /> Accept
                   </button>
                   <button
                     onClick={() => handleRejectRequest(request)}
-                    className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                    className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
                   >
                     <X size={18} /> Reject
                   </button>
@@ -211,17 +211,17 @@ export default function Feed({ user }) {
           <div className="space-y-4">
             {activities.map((post) => (
               <div key={post.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-start gap-4">
-                <div className="mt-1 bg-gray-800 p-2 rounded-full">
+                <div className="mt-1 bg-gray-800 p-2 rounded-full flex-shrink-0">
                   {getIcon(post.type)}
                 </div>
-                <div>
+                <div className="flex-1 min-w-0">
                   <p className="text-gray-300">
                     <Link to={`/profile/${post.userId}`} className="font-semibold text-white hover:text-emerald-400 transition-colors">
                       {post.userName}
                     </Link> {post.details}
                   </p>
                   <div className="mt-2 bg-gray-800 rounded px-3 py-2 inline-block">
-                    <span className="text-sm font-medium text-emerald-400">{post.webtoonTitle}</span>
+                    <span className="text-sm font-medium text-emerald-400 break-words">{post.webtoonTitle}</span>
                   </div>
                   <p className="text-xs text-gray-500 mt-2">
                     {new Date(post.createdAt).toLocaleString()}
